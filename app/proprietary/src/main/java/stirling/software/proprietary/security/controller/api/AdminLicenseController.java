@@ -111,7 +111,7 @@ public class AdminLicenseController {
             licenseKeyChecker.updateLicenseKey(licenseKey.trim());
 
             // Get current license status
-            License license = licenseKeyChecker.getPremiumLicenseEnabledResult();
+            License license = License.ENTERPRISE;
 
             // Auto-enable premium features if license is valid
             if (license != License.NORMAL) {

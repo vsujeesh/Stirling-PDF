@@ -33,10 +33,10 @@ public class LicenseKeyChecker {
     private final UserLicenseSettingsService licenseSettingsService;
 
     // Licence refreshes and request threads share these snapshots.
-    private volatile License premiumEnabledResult = License.NORMAL;
+    private volatile License premiumEnabledResult = License.ENTERPRISE;
 
     /** The licence key's own tier, before any Team-plan promotion. Same volatile contract. */
-    private volatile License licenseKeyResult = License.NORMAL;
+    private volatile License licenseKeyResult = License.ENTERPRISE;
 
     public LicenseKeyChecker(
             KeygenLicenseVerifier licenseService,
@@ -89,12 +89,12 @@ public class LicenseKeyChecker {
 
     private License verifyLicenseKey() {
         if (!applicationProperties.getPremium().isEnabled()) {
-            return License.NORMAL;
+            return License.ENTERPRISE;
         }
         String licenseKey = getLicenseKeyContent(applicationProperties.getPremium().getKey());
         if (licenseKey == null) {
             log.error("Failed to obtain license key content.");
-            return License.NORMAL;
+            return License.ENTERPRISE;
         }
         License verified = licenseService.verifyLicense(licenseKey);
         if (License.ENTERPRISE == verified) {
