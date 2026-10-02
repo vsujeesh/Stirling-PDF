@@ -9,13 +9,16 @@ export function useServerPlan(enabled: boolean) {
   const [usersInUse, setUsersInUse] = useState<number | null>(null);
   const [userLimit, setUserLimit] = useState<number | null>(null);
   const installedKey = licenseInfo?.licenseKey?.trim();
+  const hasInstalledKey =
+    Boolean(installedKey) &&
+    installedKey !== "00000000-0000-0000-0000-000000000000";
+  // A keyless ENTERPRISE tier is the offline fallback and still renders as Enterprise; a keyless
+  // SERVER comes from a cloud Team plan and is billed through Team, so it needs no server plan.
   const licenseType =
     enabled &&
     licenseInfo?.enabled &&
-    licenseInfo.hasKey &&
-    installedKey &&
-    installedKey !== "00000000-0000-0000-0000-000000000000" &&
-    licenseInfo.licenseType !== "NORMAL"
+    licenseInfo.licenseType !== "NORMAL" &&
+    (hasInstalledKey || licenseInfo.licenseType === "ENTERPRISE")
       ? licenseInfo.licenseType
       : null;
   useEffect(() => {

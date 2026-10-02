@@ -1,0 +1,16 @@
+docker run -d \
+--name stirling-pdf \
+-p 8080:8080 \
+-v stirling-tessdata:/usr/share/tessdata \
+-v stirling-configs:/configs \
+-v stirling-logs:/logs \
+-v stirling-customfiles:/customFiles:rw \
+-e SECURITY_ENABLELOGIN=true \
+-e SYSTEM_DEFAULTLOCALE=en-US \
+-e SYSTEM_GOOGLEVISIBILITY=false \
+-e SYSTEMFILEUPLOADLIMIT=2000MB \
+--restart unless-stopped \
+stirling-pdf-fat-enterprise-custom:latest
+
+
+docker build -t stirling-pdf-fat-enterprise-custom:latest -f docker/embedded/Dockerfile.fat .

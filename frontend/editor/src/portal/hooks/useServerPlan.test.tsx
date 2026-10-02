@@ -131,4 +131,33 @@ describe("local licence entitlements", () => {
       usersInUse: null,
     });
   });
+  it("renders a keyless ENTERPRISE licence as Enterprise", async () => {
+    state.licenseInfo = {
+      licenseType: "ENTERPRISE",
+      enabled: true,
+      maxUsers: 2147483647,
+      hasKey: false,
+      licenseKey: "00000000-0000-0000-0000-000000000000",
+    };
+    const { result } = renderHook(() => useServerPlan(true));
+    await waitFor(() =>
+      expect(result.current.serverPlan).toEqual({
+        licenseType: "ENTERPRISE",
+        maxUsers: 2147483647,
+        usersInUse: 37,
+      }),
+    );
+    const { serverPlan, usersInUse } = result.current;
+    render(
+      <BillingScreen
+        selfHosted
+        serverPlan={serverPlan}
+        usersInUse={usersInUse}
+        wallet={freeWallet}
+        onAddCapacity={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Enterprise")).toBeInTheDocument();
+    expect(screen.queryByText("Free")).not.toBeInTheDocument();
+  });
 });

@@ -32,21 +32,27 @@ class LicenseKeyCheckerTest {
     @Test
     void bootGateRefreshesTeamBeforeRejectingPaidConfiguration() {
         ApplicationProperties properties = new ApplicationProperties();
+        properties.getPremium().setEnabled(true);
+        properties.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers())
                 .thenThrow(new IllegalStateException("Database not initialized"))
                 .thenReturn(300);
         LicenseKeyChecker checker =
                 new LicenseKeyChecker(verifier, properties, userLicenseSettingsService);
         checker.init();
-        assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
+        // The key verifies NORMAL, but the first Team read fails, leaving the field's ENTERPRISE
+        // default in place.
+        assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
         assertThatCode(() -> checker.requireProOrEnterprise("storage.provider=s3"))
                 .doesNotThrowAnyException();
         assertEquals(License.SERVER, checker.getPremiumLicenseEnabledResult());
-        verifyNoInteractions(verifier);
+        // The gate never re-verifies the key; only the initial read did.
+        verify(verifier).verifyLicense("free");
     }
 
     @Test
-    void premiumDisabled_skipsVerification() {
+    void premiumDisabled_fallsBackToEnterprise() {
         ApplicationProperties props = new ApplicationProperties();
         props.getPremium().setEnabled(false);
         props.getPremium().setKey("dummy");
@@ -55,7 +61,7 @@ class LicenseKeyCheckerTest {
                 new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
         checker.init();
 
-        assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
+        assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
         verifyNoInteractions(verifier);
     }
 
@@ -93,7 +99,7 @@ class LicenseKeyCheckerTest {
     }
 
     @Test
-    void missingFile_resultsNormal(@TempDir Path temp) {
+    void missingFile_fallsBackToEnterprise(@TempDir Path temp) {
         Path file = temp.resolve("missing.txt");
         ApplicationProperties props = new ApplicationProperties();
         props.getPremium().setEnabled(true);
@@ -103,7 +109,7 @@ class LicenseKeyCheckerTest {
                 new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
         checker.init();
 
-        assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
+        assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
         verifyNoInteractions(verifier);
     }
 
@@ -132,14 +138,18 @@ class LicenseKeyCheckerTest {
     }
 
     /**
-     * The single injection point for cloud-sold Team, which issues no licence key. Every licence
-     * consumer reads getPremiumLicenseEnabledResult(), so promoting that one field is what lights
-     * them up; the tests below pin the boundaries the promotion must not cross.
+     * The single injection point for cloud-sold Team. A Team-only buyer installs no key, so their
+     * keyless tier is already ENTERPRISE; the promotion matters for an installed key that verifies
+     * NORMAL, which the Team capacity then lifts to SERVER. Every licence consumer reads
+     * getPremiumLicenseEnabledResult(), so promoting that one field is what lights them up; the
+     * tests below pin the boundaries the promotion must not cross.
      */
     @Test
-    void teamPlan_promotesToServerWithNoLicenceKey() {
+    void teamPlan_promotesToServerOverANormalKey() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(100);
 
         LicenseKeyChecker checker =
@@ -149,18 +159,19 @@ class LicenseKeyCheckerTest {
         assertEquals(License.SERVER, checker.getPremiumLicenseEnabledResult());
         // The key granted nothing, which is what keeps the seat arithmetic off premium.maxUsers.
         assertEquals(License.NORMAL, checker.getLicenseKeyResult());
-        verifyNoInteractions(verifier);
+        verify(verifier).verifyLicense("free");
     }
 
     /**
-     * premium.enabled is how an operator declares they hold a licence. A Team buyer has none to
-     * declare and never edits settings.yml, so the promotion sits outside that gate.
+     * A NORMAL-verifying key is the only path that reaches the Team read: a keyless install is
+     * ENTERPRISE and returns before the promotion is consulted.
      */
     @Test
-    void teamPlan_promotesEvenWhenPremiumIsDisabled() {
+    void teamPlan_promotesANormalVerifyingKey() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
-        props.getPremium().setKey("dummy");
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(100);
 
         LicenseKeyChecker checker =
@@ -177,7 +188,9 @@ class LicenseKeyCheckerTest {
     @Test
     void teamPlan_neverPromotesToEnterprise() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(100000);
 
         LicenseKeyChecker checker =
@@ -207,7 +220,9 @@ class LicenseKeyCheckerTest {
     @Test
     void noTeamPlan_staysNormal() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(null);
 
         LicenseKeyChecker checker =
@@ -220,12 +235,14 @@ class LicenseKeyCheckerTest {
     /**
      * init() is a @PostConstruct, so it runs long before the datasource exists. The row read
      * therefore throws rather than answering, and boot has to survive it -- the promotion is the
-     * tier beans' job, not this one's.
+     * tier beans' job, not this one's. The failed read leaves the field's ENTERPRISE default.
      */
     @Test
     void unreadableHolding_doesNotBreakBoot() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers())
                 .thenThrow(new IllegalStateException("no datasource yet"));
 
@@ -233,14 +250,16 @@ class LicenseKeyCheckerTest {
                 new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
 
         assertThatCode(checker::init).doesNotThrowAnyException();
-        assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
+        assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
     }
 
     /** ApplicationReadyEvent is the backstop for an instance whose row was unreadable earlier. */
     @Test
     void applicationReady_appliesThePromotionTheBootReadCouldNotSee() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers())
                 .thenThrow(new IllegalStateException("no datasource yet"))
                 .thenReturn(100);
@@ -248,7 +267,7 @@ class LicenseKeyCheckerTest {
         LicenseKeyChecker checker =
                 new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
         checker.init();
-        assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
+        assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
 
         checker.onApplicationReady();
 
@@ -264,7 +283,9 @@ class LicenseKeyCheckerTest {
     @Test
     void entitlementRefresh_promotesWithoutWaitingForTheLicenceRecheck() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         // Unreadable at boot, as it is on a real start: no datasource yet.
         when(userLicenseSettingsService.refreshLinkedTeamUsers())
                 .thenThrow(new IllegalStateException("no datasource"));
@@ -272,7 +293,7 @@ class LicenseKeyCheckerTest {
         LicenseKeyChecker checker =
                 new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
         checker.init();
-        assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
+        assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
 
         // What the sync's event stands for: the plan is now readable and says 100 users.
         reset(userLicenseSettingsService);
@@ -280,15 +301,17 @@ class LicenseKeyCheckerTest {
         checker.onEntitlementRefreshed();
 
         assertEquals(License.SERVER, checker.getPremiumLicenseEnabledResult());
-        // Still no Keygen round trip: the whole point is that this is the cheap path.
-        verifyNoInteractions(verifier);
+        // Still no second Keygen round trip: the whole point is that this is the cheap path.
+        verify(verifier).verifyLicense("free");
     }
 
     /** A cancellation travels the same seam, and must not need a restart either. */
     @Test
     void entitlementRefresh_demotesWhenThePlanIsGone() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(100);
 
         LicenseKeyChecker checker =
@@ -307,7 +330,9 @@ class LicenseKeyCheckerTest {
     @Test
     void entitlementRefresh_keepsTheTierWhenTheReadFails() {
         ApplicationProperties props = new ApplicationProperties();
-        props.getPremium().setEnabled(false);
+        props.getPremium().setEnabled(true);
+        props.getPremium().setKey("free");
+        when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
         when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(100);
 
         LicenseKeyChecker checker =
@@ -325,7 +350,10 @@ class LicenseKeyCheckerTest {
     private LicenseKeyChecker checkerWithLicense(License level) {
         ApplicationProperties props = new ApplicationProperties();
         if (level == License.NORMAL) {
-            props.getPremium().setEnabled(false);
+            props.getPremium().setEnabled(true);
+            props.getPremium().setKey("free");
+            when(verifier.verifyLicense("free")).thenReturn(License.NORMAL);
+            when(userLicenseSettingsService.refreshLinkedTeamUsers()).thenReturn(null);
         } else {
             props.getPremium().setEnabled(true);
             props.getPremium().setKey("any");

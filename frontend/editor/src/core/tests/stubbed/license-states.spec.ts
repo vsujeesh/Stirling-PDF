@@ -69,6 +69,22 @@ test.describe("Admin license panel — state matrix", () => {
     ).toHaveCount(0);
   });
 
+  test("keyless ENTERPRISE licence renders without invalid/expired warnings", async ({
+    page,
+  }) => {
+    await setUpAdminPage(page, {
+      licenseType: "ENTERPRISE",
+      enabled: true,
+      maxUsers: 2147483647,
+      hasKey: false,
+      licenseKey: "00000000-0000-0000-0000-000000000000",
+    });
+    await openSettings(page);
+    await expect(
+      page.getByText(/invalid license|expired|trial.*expired|key required/i),
+    ).toHaveCount(0);
+  });
+
   test("no-key state opens the settings dialog cleanly (license panel reachable)", async ({
     page,
   }) => {

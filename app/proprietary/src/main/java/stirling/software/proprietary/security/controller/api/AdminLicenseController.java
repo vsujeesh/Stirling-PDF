@@ -43,6 +43,8 @@ import stirling.software.proprietary.security.configuration.ee.LicenseKeyChecker
 @Tag(name = "Admin License Management", description = "Admin-only License Management APIs")
 public class AdminLicenseController {
 
+    private static final String PLACEHOLDER_LICENSE_KEY = "00000000-0000-0000-0000-000000000000";
+
     @Autowired(required = false)
     private LicenseKeyChecker licenseKeyChecker;
 
@@ -111,7 +113,7 @@ public class AdminLicenseController {
             licenseKeyChecker.updateLicenseKey(licenseKey.trim());
 
             // Get current license status
-            License license = License.ENTERPRISE;
+            License license = licenseKeyChecker.getPremiumLicenseEnabledResult();
 
             // Auto-enable premium features if license is valid
             if (license != License.NORMAL) {
@@ -181,20 +183,20 @@ public class AdminLicenseController {
             licenseKeyChecker.resyncLicense();
 
             // Get updated license status
-            License license = licenseKeyChecker.getPremiumLicenseEnabledResult();
+            License license = licenseKeyChecker.premiumTier();
             ApplicationProperties.Premium premium = applicationProperties.getPremium();
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("licenseType", license.name());
-            response.put("enabled", premium.isEnabled());
+            response.put("enabled", license != License.NORMAL);
             response.put(
                     "linkedTeamUsers",
                     licenseKeyChecker == null ? null : licenseKeyChecker.linkedTeamUsers());
             response.put(
                     "maxAllowedUsers",
                     licenseKeyChecker == null ? null : licenseKeyChecker.maxAllowedUsers());
-            response.put("maxUsers", premium.getMaxUsers());
+            response.put("maxUsers", resolveMaxUsers(premium));
             response.put("message", "License resynced successfully");
 
             log.info(
@@ -231,22 +233,19 @@ public class AdminLicenseController {
         try {
             Map<String, Object> response = new HashMap<>();
 
-            if (licenseKeyChecker != null) {
-                License license = licenseKeyChecker.getPremiumLicenseEnabledResult();
-                response.put("licenseType", license.name());
-            } else {
-                response.put("licenseType", License.NORMAL.name());
-            }
+            License license =
+                    licenseKeyChecker == null ? License.NORMAL : licenseKeyChecker.premiumTier();
+            response.put("licenseType", license.name());
 
             ApplicationProperties.Premium premium = applicationProperties.getPremium();
-            response.put("enabled", premium.isEnabled());
+            response.put("enabled", license != License.NORMAL);
             response.put(
                     "linkedTeamUsers",
                     licenseKeyChecker == null ? null : licenseKeyChecker.linkedTeamUsers());
             response.put(
                     "maxAllowedUsers",
                     licenseKeyChecker == null ? null : licenseKeyChecker.maxAllowedUsers());
-            response.put("maxUsers", premium.getMaxUsers());
+            response.put("maxUsers", resolveMaxUsers(premium));
             // Presentation only, so the plan page can say "2 servers, 100 users each" rather than a
             // bare 200. Both are 0 on a licence issued before the cap.
             response.put("serverQuantity", premium.getServerQuantity());
@@ -417,6 +416,20 @@ public class AdminLicenseController {
                                     "error",
                                     "Failed to activate license: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Installed-key seats come from the verified key; a keyless tier (the ENTERPRISE fallback) has
+     * no key metadata, so it answers with the effective admission limit instead.
+     */
+    private int resolveMaxUsers(ApplicationProperties.Premium premium) {
+        String key = premium.getKey() == null ? null : premium.getKey().trim();
+        boolean installedKey =
+                key != null && !key.isEmpty() && !PLACEHOLDER_LICENSE_KEY.equals(key);
+        if (installedKey || licenseKeyChecker == null) {
+            return premium.getMaxUsers();
+        }
+        return licenseKeyChecker.maxAllowedUsers();
     }
 
     /**

@@ -199,7 +199,7 @@ class AdminLicenseControllerTest {
         @DisplayName("resyncs with no license key, for a Team plan bought on a SaaS account")
         void noKey_stillResyncs() {
             applicationProperties.getPremium().setKey("   ");
-            when(licenseKeyChecker.getPremiumLicenseEnabledResult()).thenReturn(License.SERVER);
+            when(licenseKeyChecker.premiumTier()).thenReturn(License.SERVER);
 
             ResponseEntity<Map<String, Object>> response = controller.resyncLicense();
 
@@ -214,7 +214,7 @@ class AdminLicenseControllerTest {
         void resync_success() {
             applicationProperties.getPremium().setKey("real-key");
             applicationProperties.getPremium().setMaxUsers(3);
-            when(licenseKeyChecker.getPremiumLicenseEnabledResult()).thenReturn(License.SERVER);
+            when(licenseKeyChecker.premiumTier()).thenReturn(License.SERVER);
 
             ResponseEntity<Map<String, Object>> response = controller.resyncLicense();
 
@@ -247,7 +247,7 @@ class AdminLicenseControllerTest {
             applicationProperties.getPremium().setEnabled(true);
             applicationProperties.getPremium().setKey("my-key");
             applicationProperties.getPremium().setMaxUsers(7);
-            when(licenseKeyChecker.getPremiumLicenseEnabledResult()).thenReturn(License.ENTERPRISE);
+            when(licenseKeyChecker.premiumTier()).thenReturn(License.ENTERPRISE);
 
             ResponseEntity<Map<String, Object>> response = controller.getLicenseInfo();
 
@@ -255,6 +255,22 @@ class AdminLicenseControllerTest {
             assertThat(body(response)).containsEntry("licenseType", "ENTERPRISE");
             assertThat(body(response)).containsEntry("hasKey", true);
             assertThat(body(response)).containsEntry("licenseKey", "my-key");
+        }
+
+        @Test
+        @DisplayName("keyless Enterprise fallback reports enabled and the admission limit")
+        void keylessEnterprise_returnsResolvedTier() {
+            applicationProperties.getPremium().setEnabled(false);
+            applicationProperties.getPremium().setKey("00000000-0000-0000-0000-000000000000");
+            when(licenseKeyChecker.premiumTier()).thenReturn(License.ENTERPRISE);
+            when(licenseKeyChecker.maxAllowedUsers()).thenReturn(Integer.MAX_VALUE);
+
+            ResponseEntity<Map<String, Object>> response = controller.getLicenseInfo();
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(body(response)).containsEntry("licenseType", "ENTERPRISE");
+            assertThat(body(response)).containsEntry("enabled", true);
+            assertThat(body(response)).containsEntry("maxUsers", Integer.MAX_VALUE);
         }
 
         @Test
