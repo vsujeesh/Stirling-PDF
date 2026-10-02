@@ -13,11 +13,13 @@
  */
 
 import { AxiosError, type AxiosRequestConfig } from "axios";
+import i18n from "i18next";
 import { getSpringAuthConfig } from "@app/auth/config";
 import { JWT_STORAGE_KEY } from "@app/auth/httpClient";
 import { type OAuthProvider } from "@app/auth/spring/oauthTypes";
 import { resetOAuthState } from "@app/auth/spring/oauthStorage";
 import { isSafePostLoginRedirect } from "@app/services/postLoginRedirect";
+import { clearSupabaseSession } from "@app/auth/supabase/supabaseClient";
 import type {
   AuthUser as User,
   AuthSession as Session,
@@ -493,7 +495,9 @@ class SpringAuthClient {
       return {
         error: {
           message:
-            error instanceof Error ? error.message : "SSO redirect failed",
+            error instanceof Error
+              ? error.message
+              : i18n.t("login.ssoRedirectFailed", "SSO redirect failed"),
         },
       };
     }
@@ -504,6 +508,15 @@ class SpringAuthClient {
    */
   async signOut(): Promise<{ error: AuthError | null }> {
     try {
+      clearSupabaseSession();
+      localStorage.removeItem("stirling.portalSaasOwner");
+      sessionStorage.removeItem("stirling.portalConnect");
+      Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+        .filter(
+          (key): key is string =>
+            key !== null && (key.startsWith("sb-") || key.includes("supabase")),
+        )
+        .forEach((key) => localStorage.removeItem(key));
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(
           "stirling_sso_auto_login_logged_out",
@@ -533,10 +546,6 @@ class SpringAuthClient {
       // Clean up local storage
       localStorage.removeItem(JWT_STORAGE_KEY);
       try {
-        Object.keys(localStorage)
-          .filter((key) => key.startsWith("sb-") || key.includes("supabase"))
-          .forEach((key) => localStorage.removeItem(key));
-
         // Clear any cached OAuth redirect/session state
         resetOAuthState();
       } catch (err) {
